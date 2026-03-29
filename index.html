@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TruthLens — Fake News Detector</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: rgba(255,255,255,0.08);
+    --border2: rgba(255,255,255,0.15);
+    --text: #f0ede8;
+    --muted: #888;
+    --accent: #e8ff47;
+    --accent-dark: #b8cc2a;
+    --real: #4ade80;
+    --fake: #f87171;
+    --uncertain: #fbbf24;
+    --real-bg: rgba(74,222,128,0.08);
+    --fake-bg: rgba(248,113,113,0.08);
+    --uncertain-bg: rgba(251,191,36,0.08);
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Noise texture overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container { max-width: 780px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+  /* Header */
+  header {
+    padding: 48px 0 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 56px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 52px;
+    letter-spacing: 2px;
+    line-height: 1;
+    color: var(--text);
+  }
+
+  .logo span { color: var(--accent); }
+
+  .tagline {
+    font-size: 12px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    padding-bottom: 6px;
+  }
+
+  /* Input section */
+  .input-section { margin-bottom: 40px; }
+
+  .input-label {
+    font-size: 11px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 14px;
+    display: block;
+  }
+
+  textarea {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    font-weight: 300;
+    line-height: 1.7;
+    padding: 20px;
+    resize: vertical;
+    min-height: 140px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  textarea:focus { border-color: var(--accent); }
+  textarea::placeholder { color: #444; }
+
+  /* Examples */
+  .examples-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 14px;
+    margin-bottom: 20px;
+  }
+
+  .ex-chip {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    padding: 5px 12px;
+    border: 1px solid var(--border2);
+    border-radius: 2px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.5px;
+  }
+
+  .ex-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Analyze button */
+  .analyze-btn {
+    width: 100%;
+    padding: 18px;
+    background: var(--accent);
+    color: #0a0a0a;
+    border: none;
+    border-radius: 4px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 3px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .analyze-btn:hover { background: var(--accent-dark); transform: translateY(-1px); }
+  .analyze-btn:active { transform: translateY(0); }
+  .analyze-btn:disabled { background: #2a2a2a; color: #555; cursor: default; transform: none; }
+
+  /* Loading */
+  .loading {
+    display: none;
+    text-align: center;
+    padding: 60px 0;
+  }
+
+  .loading.visible { display: block; }
+
+  .scan-line {
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: scan 1.2s ease-in-out infinite;
+    margin-bottom: 20px;
+    border-radius: 1px;
+  }
+
+  @keyframes scan {
+    0% { transform: scaleX(0); opacity: 0; }
+    50% { transform: scaleX(1); opacity: 1; }
+    100% { transform: scaleX(0); opacity: 0; }
+  }
+
+  .loading-text {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 3px;
+    color: var(--muted);
+    text-transform: uppercase;
+    animation: blink 1s ease-in-out infinite;
+  }
+
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  /* Result */
+  #result { display: none; }
+  #result.visible { display: block; animation: fadeUp 0.4s ease; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Verdict banner */
+  .verdict-banner {
+    border-radius: 4px;
+    padding: 28px 32px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+
+  .verdict-banner.real { background: var(--real-bg); border: 1px solid rgba(74,222,128,0.2); }
+  .verdict-banner.fake { background: var(--fake-bg); border: 1px solid rgba(248,113,113,0.2); }
+  .verdict-banner.uncertain { background: var(--uncertain-bg); border: 1px solid rgba(251,191,36,0.2); }
+
+  .verdict-label {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 44px;
+    letter-spacing: 2px;
+    line-height: 1;
+  }
+
+  .verdict-banner.real .verdict-label { color: var(--real); }
+  .verdict-banner.fake .verdict-label { color: var(--fake); }
+  .verdict-banner.uncertain .verdict-label { color: var(--uncertain); }
+
+  .confidence-block { text-align: right; }
+  .conf-number {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 40px;
+    line-height: 1;
+  }
+  .verdict-banner.real .conf-number { color: var(--real); }
+  .verdict-banner.fake .conf-number { color: var(--fake); }
+  .verdict-banner.uncertain .conf-number { color: var(--uncertain); }
+
+  .conf-label {
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Confidence bar */
+  .conf-bar-wrap { margin-bottom: 28px; }
+  .conf-bar-bg {
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .conf-bar-fill {
+    height: 3px;
+    border-radius: 2px;
+    transition: width 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* Summary */
+  .summary-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    font-size: 15px;
+    line-height: 1.75;
+    color: #ccc;
+  }
+
+  /* Signals grid */
+  .signals-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  @media (max-width: 560px) { .signals-grid { grid-template-columns: 1fr; } }
+
+  .signals-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 18px 20px;
+  }
+
+  .signals-title {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    font-family: 'DM Mono', monospace;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .signals-title.red { color: var(--fake); }
+  .signals-title.green { color: var(--real); }
+
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .signal-item {
+    font-size: 13px;
+    color: #aaa;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.5;
+    display: flex;
+    gap: 8px;
+  }
+
+  .signal-item:last-child { border-bottom: none; }
+
+  .signal-bullet { color: var(--muted); flex-shrink: 0; margin-top: 1px; }
+
+  /* Advice */
+  .advice-block {
+    background: var(--surface2);
+    border-left: 3px solid var(--accent);
+    padding: 16px 20px;
+    border-radius: 0 4px 4px 0;
+    font-size: 13px;
+    color: #aaa;
+    line-height: 1.6;
+  }
+
+  .advice-label {
+    font-size: 10px;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    font-family: 'DM Mono', monospace;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+
+  /* Error */
+  .error-msg {
+    background: var(--fake-bg);
+    border: 1px solid rgba(248,113,113,0.2);
+    border-radius: 4px;
+    padding: 16px 20px;
+    color: var(--fake);
+    font-size: 14px;
+    font-family: 'DM Mono', monospace;
+  }
+
+  /* Footer */
+  footer {
+    padding: 48px 0 32px;
+    text-align: center;
+    color: #333;
+    font-size: 12px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 1px;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <div>
+      <div class="logo">Truth<span>Lens</span></div>
+    </div>
+    <div class="tagline">AI-powered news verifier</div>
+  </header>
+
+  <div class="input-section">
+    <label class="input-label">Paste headline or article text</label>
+    <textarea id="newsInput" placeholder="Enter a news headline, article snippet, or claim to analyze..."></textarea>
+
+    <div class="examples-row">
+      <span style="font-size:11px;font-family:'DM Mono',monospace;color:#444;letter-spacing:1px;align-self:center;">Try:</span>
+      <button class="ex-chip" onclick="setExample(0)">Bleach cures COVID</button>
+      <button class="ex-chip" onclick="setExample(1)">Water on Mars</button>
+      <button class="ex-chip" onclick="setExample(2)">5G causes cancer</button>
+      <button class="ex-chip" onclick="setExample(3)">Climate change record</button>
+    </div>
+
+    <button class="analyze-btn" id="analyzeBtn" onclick="analyze()">Analyze Now</button>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="scan-line"></div>
+    <div class="loading-text">Scanning for credibility signals...</div>
+  </div>
+
+  <div id="result"></div>
+
+  <footer>TruthLens &mdash; Always verify with primary sources</footer>
+</div>
+
+<script>
+const examples = [
+  "BREAKING: Doctors confirm that drinking diluted bleach cures COVID-19. Big pharma is hiding this miracle cure from the public to protect their vaccine profits!",
+  "NASA scientists have confirmed the discovery of water ice deposits near the south pole of Mars, raising hopes for future human missions to the planet.",
+  "URGENT WARNING: New peer-reviewed study proves that 5G cell towers emit radiation directly linked to cancer. Thousands of deaths already covered up by governments worldwide.",
+  "Scientists report 2024 was the hottest year on record globally, continuing a decades-long trend of rising temperatures linked to greenhouse gas emissions."
+];
+
+function setExample(i) {
+  document.getElementById('newsInput').value = examples[i];
+}
+
+async function analyze() {
+  const text = document.getElementById('newsInput').value.trim();
+  if (!text) {
+    document.getElementById('newsInput').focus();
+    return;
+  }
+
+  const btn = document.getElementById('analyzeBtn');
+  const loading = document.getElementById('loading');
+  const result = document.getElementById('result');
+
+  btn.disabled = true;
+  loading.classList.add('visible');
+  result.classList.remove('visible');
+  result.innerHTML = '';
+
+  try {
+    const res = await fetch('http://localhost:5000/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+
+    const data = await res.json();
+
+    if (data.error) {
+      result.innerHTML = `<div class="error-msg">Error: ${data.error}</div>`;
+    } else {
+      result.innerHTML = buildResult(data);
+      setTimeout(() => {
+        const fill = document.getElementById('confFill');
+        if (fill) fill.style.width = data.confidence + '%';
+      }, 100);
+    }
+
+    result.classList.add('visible');
+  } catch (e) {
+    result.innerHTML = `<div class="error-msg">Could not connect to backend. Make sure app.py is running on port 5000.</div>`;
+    result.classList.add('visible');
+  }
+
+  loading.classList.remove('visible');
+  btn.disabled = false;
+}
+
+function buildResult(d) {
+  const isReal = d.verdict === "Real News";
+  const isFake = d.verdict === "Fake News";
+  const cls = isReal ? 'real' : isFake ? 'fake' : 'uncertain';
+  const barColor = isReal ? '#4ade80' : isFake ? '#f87171' : '#fbbf24';
+
+  const redFlags = (d.red_flags || []).map(f =>
+    `<div class="signal-item"><span class="signal-bullet">—</span>${f}</div>`
+  ).join('') || '<div class="signal-item" style="color:#555">None detected</div>';
+
+  const posSigs = (d.positive_signals || []).map(s =>
+    `<div class="signal-item"><span class="signal-bullet">—</span>${s}</div>`
+  ).join('') || '<div class="signal-item" style="color:#555">None detected</div>';
+
+  return `
+    <div class="verdict-banner ${cls}">
+      <div class="verdict-label">${d.verdict}</div>
+      <div class="confidence-block">
+        <div class="conf-number">${Math.round(d.confidence)}%</div>
+        <div class="conf-label">Confidence</div>
+      </div>
+    </div>
+
+    <div class="conf-bar-wrap">
+      <div class="conf-bar-bg">
+        <div class="conf-bar-fill" id="confFill" style="width:0%;background:${barColor}"></div>
+      </div>
+    </div>
+
+    <div class="summary-block">${d.summary}</div>
+
+    <div class="signals-grid">
+      <div class="signals-card">
+        <div class="signals-title red">
+          <div class="dot" style="background:#f87171"></div>
+          Red flags
+        </div>
+        ${redFlags}
+      </div>
+      <div class="signals-card">
+        <div class="signals-title green">
+          <div class="dot" style="background:#4ade80"></div>
+          Positive signals
+        </div>
+        ${posSigs}
+      </div>
+    </div>
+
+    <div class="advice-block">
+      <div class="advice-label">Verify it yourself</div>
+      ${d.advice}
+    </div>
+  `;
+}
+</script>
+</body>
+</html>
