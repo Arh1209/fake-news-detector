@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 import json
 import os
 
-# Load API key from .env file
 load_dotenv()
 
 app = Flask(__name__, static_folder=".")
@@ -14,7 +13,7 @@ CORS(app)
 API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 if not API_KEY:
-    print("ERROR: GROQ_API_KEY not found! Make sure your .env file exists.")
+    print("ERROR: GROQ_API_KEY not found!")
 
 client = Groq(api_key=API_KEY)
 
@@ -71,8 +70,9 @@ Respond ONLY with a valid JSON object (no markdown, no backticks, no extra text)
         return jsonify({"error": str(e)}), 500
 
 
+port = int(os.environ.get("PORT", 5000))
+
 if __name__ == "__main__":
     print("Starting Fake News Detector server...")
-    print("Open http://127.0.0.1:5000 in your browser")
-    port = int(os.environ.get("PORT", 5000))
+    print(f"Open http://127.0.0.1:{port} in your browser")
     app.run(host="0.0.0.0", port=port)
